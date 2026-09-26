@@ -170,6 +170,9 @@ footer{border-top:1px solid var(--line);padding:24px 0 32px}
 .foot-links{display:flex;gap:8px;flex-wrap:wrap}
 .coffee{display:inline-flex;align-items:center;gap:7px;padding:8px 14px;border-radius:8px;background:#FFC439;color:#1B1B1B;font-weight:700;text-decoration:none;font-size:14px}
 .coffee:hover{background:#FFB300}
+.visits{display:inline-flex;align-items:center;gap:6px;font-size:13px}
+.visits svg{width:15px;height:15px}
+.visits b{color:var(--ink);font-family:var(--mono);font-weight:500}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
 </head>
@@ -374,7 +377,7 @@ footer{border-top:1px solid var(--line);padding:24px 0 32px}
 <section id="videos" class="panel" role="tabpanel" hidden>
   <div class="intro">
     <h1>AppSheet tutorials</h1>
-    <p>Every video from my channel, newest first. New uploads show up here automatically.</p>
+    <p>Every video from my channel, newest first. New uploads appear here automatically.</p>
   </div>
   <div class="player">
     <iframe id="yt-player" title="Joe Tayactac YouTube videos" loading="lazy"
@@ -383,13 +386,14 @@ footer{border-top:1px solid var(--line);padding:24px 0 32px}
   </div>
   <div id="yt-latest" hidden>
     <div class="vid-head">
-      <h2>Latest videos</h2>
+      <h2><span id="yt-title">All videos</span> <span class="hint" id="yt-count" style="font-size:14px"></span></h2>
       <input type="text" class="vid-search" id="yt-search" placeholder="Search videos" aria-label="Search videos">
     </div>
     <div class="vid-grid" id="yt-grid"></div>
     <p class="hint" id="yt-empty" hidden>No videos match that search.</p>
+    <button type="button" class="btn ghost" id="yt-more" style="margin:22px auto 0;display:flex" hidden>Show more videos</button>
   </div>
-  <p class="hint" style="margin-top:18px">Looking for an older video? <a href="https://www.youtube.com/@JoeTayactac/videos" target="_blank" rel="noopener">See the full list on YouTube</a>.</p>
+  <p class="hint" id="yt-older" style="margin-top:18px">Looking for an older video? <a href="https://www.youtube.com/@JoeTayactac/videos" target="_blank" rel="noopener">See the full list on YouTube</a>.</p>
 </section>
 
 <section id="hire" class="panel" role="tabpanel" hidden>
@@ -435,7 +439,10 @@ footer{border-top:1px solid var(--line);padding:24px 0 32px}
 
 <footer>
   <div class="wrap foot">
-    <span>Free tools for AppSheet builders. Nothing you type leaves your browser, except on the Hire me form.</span>
+    <div style="display:grid;gap:4px">
+      <span>Free tools for AppSheet builders. Nothing you type leaves your browser, except on the Hire me form.</span>
+      <span class="visits" id="visits" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg><b id="visits-n"></b> site visits</span>
+    </div>
     <div class="foot-links">
       <a class="coffee" href="https://paypal.me/Joemarietayactac1" target="_blank" rel="noopener">☕ Buy me a coffee</a>
       <a class="yt" href="https://www.youtube.com/@JoeTayactac" target="_blank" rel="noopener">
@@ -768,11 +775,15 @@ let qrRefresh=()=>{};
 
 let loadVideos=()=>{};
 (function(){
+  const API_KEY='';
   const CHANNEL_ID='UCRC82n8iFWNSpPFIvF8ZsJg';
   const UPLOADS='UU'+CHANNEL_ID.slice(2);
   const EMBED='https://www.youtube-nocookie.com/embed/';
   const RSS='https://www.youtube.com/feeds/videos.xml?channel_id='+CHANNEL_ID;
-  let loaded=false, items=[];
+  const PAGE=24;
+  let loaded=false, items=[], shown=PAGE;
+
+  const fmtDate=d=>new Date(d).toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'});
 
   function play(id, btn){
     $('yt-player').src = EMBED+id+'?autoplay=1&rel=0&list='+UPLOADS;
@@ -782,8 +793,9 @@ let loadVideos=()=>{};
   function draw(){
     const term=$('yt-search').value.trim().toLowerCase();
     const list=items.filter(v=>v.title.toLowerCase().includes(term));
+    const visible=term?list:list.slice(0,shown);
     $('yt-grid').innerHTML='';
-    list.forEach(v=>{
+    visible.forEach(v=>{
       const b=document.createElement('button'); b.className='vid'; b.type='button';
       b.innerHTML=`<span class="thumb"><img loading="lazy" alt="" src="https://i.ytimg.com/vi/${v.id}/mqdefault.jpg"></span>`+
         `<span class="t">${esc(v.title)}</span><span class="d">${esc(v.date)}</span>`;
@@ -791,28 +803,67 @@ let loadVideos=()=>{};
       $('yt-grid').appendChild(b);
     });
     $('yt-empty').hidden=list.length>0;
+    $('yt-more').hidden=!!term || shown>=list.length;
+    $('yt-more').textContent='Show more videos ('+(list.length-shown)+' left)';
   }
-  loadVideos=function(){
+  function show(list, complete){
+    items=list; if(!items.length) return;
+    $('yt-count').textContent=complete ? items.length+' videos' : 'Latest '+items.length;
+    $('yt-title').textContent=complete ? 'All videos' : 'Latest videos';
+    $('yt-older').hidden=complete;
+    $('yt-latest').hidden=false; draw();
+  }
+  async function fromApi(){
+    const all=[]; let token='';
+    do{
+      const url='https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&playlistId='+UPLOADS+'&key='+API_KEY+(token?'&pageToken='+token:'');
+      const d=await (await fetch(url)).json();
+      if(d.error) throw new Error(d.error.message);
+      (d.items||[]).forEach(it=>{
+        const sn=it.snippet, id=sn.resourceId&&sn.resourceId.videoId;
+        if(id && sn.title!=='Private video' && sn.title!=='Deleted video') all.push({id, title:sn.title, date:fmtDate(sn.publishedAt)});
+      });
+      token=d.nextPageToken||'';
+    }while(token);
+    return all;
+  }
+  async function fromRss(){
+    const d=await (await fetch('https://api.rss2json.com/v1/api.json?rss_url='+encodeURIComponent(RSS))).json();
+    if(d.status!=='ok') return [];
+    return (d.items||[]).map(it=>{
+      const m=(it.link||'').match(/v=([\w-]{11})/) || (it.guid||'').match(/([\w-]{11})$/);
+      return m ? {id:m[1], title:it.title, date:fmtDate((it.pubDate||'').replace(' ','T'))} : null;
+    }).filter(Boolean);
+  }
+  loadVideos=async function(){
     if(loaded) return; loaded=true;
     $('yt-player').src = EMBED+'videoseries?rel=0&list='+UPLOADS;
-    fetch('https://api.rss2json.com/v1/api.json?rss_url='+encodeURIComponent(RSS))
-      .then(r=>r.json())
-      .then(d=>{
-        if(d.status!=='ok'||!d.items||!d.items.length) return;
-        items=d.items.map(it=>{
-          const m=(it.link||'').match(/v=([\w-]{11})/) || (it.guid||'').match(/([\w-]{11})$/);
-          return m ? {id:m[1], title:it.title, date:new Date((it.pubDate||'').replace(' ','T')).toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'})} : null;
-        }).filter(Boolean);
-        if(!items.length) return;
-        $('yt-latest').hidden=false; draw();
-      })
-      .catch(()=>{});
+    if(API_KEY){
+      try{ show(await fromApi(), true); return; }catch(e){}
+    }
+    try{ show(await fromRss(), false); }catch(e){}
   };
   $('yt-search').addEventListener('input',draw);
+  $('yt-more').addEventListener('click',()=>{ shown+=PAGE; draw(); });
 })();
 
 openTab(location.hash.slice(1)||'progress');
-fetch('https://countapi.mileshilliard.com/api/v1/hit/joetayactac_qrcode_visits').catch(()=>{});
+(function(){
+  const BASE='https://countapi.mileshilliard.com/api/v1/';
+  const KEY='joetayactac_qrcode_visits';
+  let counted=false;
+  try{ counted=sessionStorage.getItem('counted')==='1'; }catch(e){}
+  fetch(BASE+(counted?'get/':'hit/')+KEY)
+    .then(r=>r.json())
+    .then(d=>{
+      const n=Number(d && (d.value ?? d.count));
+      if(!Number.isFinite(n)) return;
+      try{ sessionStorage.setItem('counted','1'); }catch(e){}
+      $('visits-n').textContent=n.toLocaleString();
+      $('visits').hidden=false;
+    })
+    .catch(()=>{});
+})();
 </script>
 </body>
 </html>
